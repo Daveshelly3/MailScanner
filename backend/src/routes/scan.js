@@ -1,12 +1,11 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
-import { fetchEmails } from '../services/graphService.js';
+import { fetchEmails } from '../services/mcpClient.js';
 import { classifyEmails } from '../services/aiService.js';
 import { prisma } from '../services/db.js';
 
 const router = Router();
 
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', async (req, res) => {
   const { timeWindow = '24h', folder = 'inbox', maxCount = 50 } = req.body;
 
   const validWindows = ['6h', '24h', '48h', '3d', '7d', 'alltime'];
@@ -20,13 +19,7 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   try {
-    const emails = await fetchEmails({
-      accessToken: req.session.accessToken,
-      timeWindow,
-      folder,
-      maxCount,
-    });
-
+    const emails = await fetchEmails({ timeWindow, folder, maxCount });
     const classified = await classifyEmails(emails);
 
     const flagged = classified.filter((e) => e.needsAttention);
@@ -34,7 +27,6 @@ router.post('/', requireAuth, async (req, res) => {
 
     await prisma.scanResult.create({
       data: {
-        userId: req.session.userId,
         timeWindow,
         folder,
         emailCount: classified.length,
@@ -53,17 +45,13 @@ router.post('/', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[Scan] Error:', err);
-    if (err.statusCode === 401) {
-      return res.status(401).json({ error: 'Microsoft access token expired. Please sign in again.' });
-    }
-    res.status(500).json({ error: 'Scan failed. Please try again.' });
+    res.status(500).json({ error: err.message || 'Scan failed. Please try again.' });
   }
 });
 
-router.get('/history', requireAuth, async (req, res) => {
+router.get('/history', async (req, res) => {
   try {
     const history = await prisma.scanResult.findMany({
-      where: { userId: req.session.userId },
       orderBy: { scannedAt: 'desc' },
       take: 10,
       select: {
@@ -76,7 +64,6 @@ router.get('/history', requireAuth, async (req, res) => {
         urgentCount: true,
       },
     });
-
     res.json({ history });
   } catch (err) {
     console.error('[Scan] History error:', err);
