@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  microsoftId  String      @unique
+  email        String      @unique
+  displayName  String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  scanHistory  ScanResult[]
+}
+
+model ScanResult {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scannedAt    DateTime @default(now())
+  timeWindow   String
+  folder       String
+  emailCount   Int
+  flaggedCount Int
+  urgentCount  Int
+  results      Json
+}
