@@ -13,7 +13,7 @@ import { existsSync, mkdirSync } from 'fs';
 import authRoutes from './routes/auth.js';
 import scanRoutes from './routes/scan.js';
 import actionsRoutes from './routes/actions.js';
-import { authMode } from './services/emailService.js';
+import { setupMode } from './services/emailService.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIST = join(__dirname, '../../frontend/dist');
@@ -73,7 +73,7 @@ app.use('/scan', scanLimiter, scanRoutes);
 app.use('/actions', actionsRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', mode: authMode(), timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', mode: setupMode(), timestamp: new Date().toISOString() });
 });
 
 if (SERVE_STATIC) {
@@ -92,6 +92,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`MailScanner API running on port ${PORT}`);
-  console.log(`Auth mode: ${authMode()}`);
+  console.log(`Auth mode: ${setupMode()}`);
   console.log(`Open: http://localhost:${PORT}`);
 });

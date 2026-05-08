@@ -5,13 +5,13 @@ import {
   acquireTokenByCode,
   isAzureConfigured,
 } from '../config/msal.js';
-import { authMode } from '../services/emailService.js';
+import { setupMode } from '../services/emailService.js';
 import { prisma } from '../services/db.js';
 
 const router = Router();
 
 router.get('/mode', (req, res) => {
-  res.json({ mode: authMode() });
+  res.json({ mode: setupMode() });
 });
 
 router.get('/login', async (req, res) => {
@@ -79,9 +79,19 @@ router.get('/callback', async (req, res) => {
 });
 
 router.get('/me', async (req, res) => {
-  // In MCP mode there is no Azure user but the app is "logged in" automatically
-  if (authMode() === 'mcp') {
-    return res.json({ user: { displayName: 'Claude Code Session', email: 'mcp', id: 'mcp' }, mode: 'mcp' });
+  // IMAP and MCP modes: no Azure user, app is "logged in" automatically
+  const mode = setupMode();
+  if (mode === 'imap') {
+    return res.json({
+      user: { displayName: process.env.IMAP_USER, email: process.env.IMAP_USER, id: 'imap' },
+      mode: 'imap',
+    });
+  }
+  if (mode === 'mcp') {
+    return res.json({
+      user: { displayName: 'Claude Code Session', email: 'mcp', id: 'mcp' },
+      mode: 'mcp',
+    });
   }
 
   if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });

@@ -1,9 +1,10 @@
 import { acquireTokenSilent, isAzureConfigured } from '../config/msal.js';
-import { authMode } from '../services/emailService.js';
+import { setupMode } from '../services/emailService.js';
 
 export const requireAuth = async (req, res, next) => {
-  // If running in MCP mode (no Azure config), bypass auth entirely
-  if (authMode() === 'mcp') return next();
+  // IMAP and MCP modes don't require interactive sign-in — credentials live in env
+  const mode = setupMode();
+  if (mode === 'imap' || mode === 'mcp') return next();
 
   if (!req.session?.userId || !req.session?.accessToken) {
     return res.status(401).json({ error: 'Not authenticated' });

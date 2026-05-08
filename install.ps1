@@ -113,37 +113,32 @@ if ($envContent -notmatch '^ANTHROPIC_API_KEY=sk-ant-' -and $envContent -notmatc
     if ($key) { Set-EnvValue $envPath 'ANTHROPIC_API_KEY' $key; Write-Ok "API key saved" }
 }
 
-# Azure OAuth credentials
+# IMAP credentials (recommended)
 $envContent = Get-Content $envPath -Raw
-$hasClientId     = $envContent -match '^AZURE_CLIENT_ID=[^\s]+\w'
-$hasClientSecret = $envContent -match '^AZURE_CLIENT_SECRET=[^\s]+\w'
-if (-not ($hasClientId -and $hasClientSecret)) {
-    Write-Step "Microsoft Azure App Registration"
+$hasImapUser = $envContent -match '(?m)^IMAP_USER=[^\s]+\w'
+$hasImapPass = $envContent -match '(?m)^IMAP_PASSWORD=[^\s]+\w'
+if (-not ($hasImapUser -and $hasImapPass)) {
+    Write-Step "Outlook IMAP credentials"
     Write-Host ""
-    Write-Host "You need to register an app in Azure (5 min, free):" -ForegroundColor Yellow
+    Write-Host "MailScanner connects to Outlook via IMAP. You need an App Password" -ForegroundColor Yellow
+    Write-Host "(a 16-char code Microsoft generates so the app can sign in even with 2FA)." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  1. Open https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
-    Write-Host "  2. Click 'New registration'"
-    Write-Host "     - Name:                  MailScanner"
-    Write-Host "     - Supported accounts:    Accounts in any organizational directory and personal accounts"
-    Write-Host "     - Redirect URI (Web):    http://localhost:3001/auth/callback"
-    Write-Host "     Click Register."
+    Write-Host "  1. Open https://account.microsoft.com/security"
+    Write-Host "  2. Click 'Advanced security options'"
+    Write-Host "  3. Under 'App passwords', click 'Create a new app password'"
+    Write-Host "  4. Copy the 16-character code shown (no spaces)"
     Write-Host ""
-    Write-Host "  3. From the Overview page, copy 'Application (client) ID'"
-    Write-Host "  4. Go to Certificates and secrets > New client secret > copy the Value"
-    Write-Host "  5. Go to API permissions > Add a permission > Microsoft Graph > Delegated:"
-    Write-Host "     add Mail.Read and User.Read, then click 'Grant admin consent' if you have it."
-    Write-Host ""
-    $skipAzure = Read-Host "Skip Azure setup for now? (y/N)"
-    if ($skipAzure -ne 'y' -and $skipAzure -ne 'Y') {
-        $clientId = Read-Host "Paste AZURE_CLIENT_ID (Application/client ID)"
-        $clientSecret = Read-Host "Paste AZURE_CLIENT_SECRET (the secret Value, not Secret ID)"
-        if ($clientId)     { Set-EnvValue $envPath 'AZURE_CLIENT_ID'     $clientId }
-        if ($clientSecret) { Set-EnvValue $envPath 'AZURE_CLIENT_SECRET' $clientSecret }
-        Set-EnvValue $envPath 'AZURE_TENANT_ID' 'common'
-        Write-Ok "Azure credentials saved"
+    $skipImap = Read-Host "Skip IMAP setup for now? (y/N)"
+    if ($skipImap -ne 'y' -and $skipImap -ne 'Y') {
+        $imapUser = Read-Host "Outlook email address"
+        $imapPass = Read-Host "App password (16-char code)"
+        if ($imapUser) { Set-EnvValue $envPath 'IMAP_USER'     $imapUser }
+        if ($imapPass) { Set-EnvValue $envPath 'IMAP_PASSWORD' $imapPass }
+        Set-EnvValue $envPath 'IMAP_HOST' 'outlook.office365.com'
+        Set-EnvValue $envPath 'IMAP_PORT' '993'
+        Write-Ok "IMAP credentials saved"
     } else {
-        Write-Warn "You can edit backend\.env later to add AZURE_CLIENT_ID and AZURE_CLIENT_SECRET"
+        Write-Warn "Edit backend\.env later to set IMAP_USER and IMAP_PASSWORD"
     }
 }
 

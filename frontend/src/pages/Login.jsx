@@ -20,7 +20,8 @@ export default function Login() {
     await login();
   };
 
-  const azureNotConfigured = mode === 'none';
+  const notConfigured = mode === 'none';
+  const azureMode = mode === 'azure';
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900">
@@ -59,42 +60,52 @@ export default function Login() {
               </div>
             )}
 
-            {azureNotConfigured && (
+            {notConfigured && (
               <div role="alert" className="mt-5 rounded-lg bg-amber-500/10 border border-amber-400/30 px-4 py-3 text-sm text-amber-200">
-                <p className="font-semibold mb-1">Azure OAuth not configured</p>
-                <p className="text-xs leading-relaxed">
-                  Add <code className="bg-black/30 px-1 rounded">AZURE_CLIENT_ID</code> and{' '}
-                  <code className="bg-black/30 px-1 rounded">AZURE_CLIENT_SECRET</code> to{' '}
-                  <code className="bg-black/30 px-1 rounded">backend/.env</code>, then restart.
-                  See README for the 5-minute Azure App Registration setup.
+                <p className="font-semibold mb-2">No email source configured</p>
+                <p className="text-xs leading-relaxed mb-2">
+                  Edit <code className="bg-black/30 px-1 rounded">backend/.env</code> and set IMAP credentials:
+                </p>
+                <pre className="bg-black/40 rounded p-2 text-xs overflow-x-auto">
+{`IMAP_USER=you@outlook.com
+IMAP_PASSWORD=<app password>`}
+                </pre>
+                <p className="text-xs mt-2">
+                  Generate an App Password at{' '}
+                  <a href="https://account.microsoft.com/security" target="_blank" rel="noopener noreferrer" className="underline text-amber-100">
+                    account.microsoft.com/security
+                  </a>
+                  {' '}→ Advanced security options → App passwords. Restart the backend after saving.
                 </p>
               </div>
             )}
 
-            <div className="mt-8">
-              <button
-                onClick={handleLogin}
-                disabled={loginLoading || azureNotConfigured}
-                className="flex w-full items-center justify-center gap-3 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-900 shadow-lg transition-all hover:bg-slate-50 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {loginLoading ? (
-                  <>
-                    <LoadingSpinner size="sm" />
-                    Redirecting...
-                  </>
-                ) : (
-                  <>
-                    <svg width="20" height="20" viewBox="0 0 21 21" fill="none" aria-hidden="true">
-                      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-                      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-                      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-                      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-                    </svg>
-                    Sign in with Microsoft 365
-                  </>
-                )}
-              </button>
-            </div>
+            {azureMode && (
+              <div className="mt-8">
+                <button
+                  onClick={handleLogin}
+                  disabled={loginLoading}
+                  className="flex w-full items-center justify-center gap-3 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-slate-900 shadow-lg transition-all hover:bg-slate-50 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {loginLoading ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      Redirecting...
+                    </>
+                  ) : (
+                    <>
+                      <svg width="20" height="20" viewBox="0 0 21 21" fill="none" aria-hidden="true">
+                        <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                        <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                        <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                        <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+                      </svg>
+                      Sign in with Microsoft 365
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             <div className="mt-6 flex items-start gap-2 text-xs text-slate-400">
               <svg xmlns="http://www.w3.org/2000/svg" className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
