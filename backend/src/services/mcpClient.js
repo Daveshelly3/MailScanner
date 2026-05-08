@@ -1,15 +1,25 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync, readdirSync } from 'fs';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 function getMcpServerConfig() {
-  // If explicitly configured, use that
+  // 1. Explicit env config wins (Windows / standalone deployments)
   if (process.env.MCP_SERVER_URL) {
-    return { url: process.env.MCP_SERVER_URL, headers: {} };
+    let headers = {};
+    if (process.env.MCP_SERVER_HEADERS) {
+      try { headers = JSON.parse(process.env.MCP_SERVER_HEADERS); }
+      catch { console.warn('[MCP] MCP_SERVER_HEADERS is not valid JSON, ignoring'); }
+    }
+    // Auto-derive session/server headers from URL when running through
+    // the Anthropic CCR proxy and headers were not supplied
+    if (!Object.keys(headers).length && process.env.MCP_SERVER_URL.includes('api.anthropic.com')) {
+      const sessionMatch = process.env.MCP_SERVER_URL.match(/ccr-sessions\/([^/]+)/);
+      const serverMatch = process.env.MCP_SERVER_URL.match(/toolbox_mcp_server_id=([^&]+)/);
+      if (sessionMatch) headers['X-Session-UUID'] = sessionMatch[1];
+      if (serverMatch)  headers['X-MCP-Server-ID'] = serverMatch[1];
+    }
+    return { url: process.env.MCP_SERVER_URL, headers };
   }
 
-  // Auto-discover from Claude Code session config (when running inside CCR)
+  // 2. Auto-discover from Claude Code session config (works in CCR cloud only)
   try {
     const tmpFiles = readdirSync('/tmp').filter((f) => f.startsWith('mcp-config-'));
     if (tmpFiles.length) {
@@ -30,33 +40,70 @@ function getMcpServerConfig() {
   );
 }
 
-async function runMcpPrompt(prompt, maxTokens = 4096) {
+async function callTool(toolName, args) {
   const { url, headers } = getMcpServerConfig();
 
-  const response = await anthropic.beta.messages.create({
-    model: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
-    max_tokens: maxTokens,
-    mcp_servers: [
-      {
-        type: 'url',
-        url,
-        name: 'microsoft365',
-        ...(Object.keys(headers).length ? { headers } : {}),
-      },
-    ],
-    messages: [{ role: 'user', content: prompt }],
-    betas: ['mcp-client-2025-04-04'],
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      ...headers,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { name: toolName, arguments: args },
+      id: Date.now(),
+    }),
   });
 
-  // Extract text from the final response
-  const textBlock = response.content.find((b) => b.type === 'text');
-  return textBlock?.text || '';
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`MCP call failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  let result;
+  if (contentType.includes('text/event-stream')) {
+    result = parseSseResponse(await res.text());
+  } else {
+    const json = await res.json();
+    if (json.error) throw new Error(`MCP error: ${json.error.message}`);
+    result = json.result;
+  }
+
+  return extractContent(result);
+}
+
+function parseSseResponse(raw) {
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    try {
+      const msg = JSON.parse(line.slice(5).trim());
+      if (msg.result) return msg.result;
+      if (msg.error)  throw new Error(`MCP SSE error: ${msg.error.message}`);
+    } catch { /* skip unparseable lines */ }
+  }
+  throw new Error('No result found in SSE response');
+}
+
+function extractContent(result) {
+  if (Array.isArray(result?.content)) {
+    const text = result.content.find((c) => c.type === 'text');
+    if (text) {
+      try { return JSON.parse(text.text); } catch { return text.text; }
+    }
+  }
+  return result;
 }
 
 const TIME_WINDOW_MAP = {
   '6h':    '6 hours ago',
-  '24h':   'yesterday',
-  '48h':   '2 days ago',
+  '24h':   '24 hours ago',
+  '48h':   '48 hours ago',
   '3d':    '3 days ago',
   '7d':    '7 days ago',
   alltime: null,
@@ -64,52 +111,44 @@ const TIME_WINDOW_MAP = {
 
 export async function fetchEmails({ timeWindow, folder, maxCount }) {
   const since = TIME_WINDOW_MAP[timeWindow] ?? TIME_WINDOW_MAP['24h'];
-  const count = Math.min(Math.max(Number(maxCount) || 50, 5), 50);
+  const limit = Math.min(Math.max(Number(maxCount) || 50, 5), 50);
 
-  const folderInstruction = folder === 'inbox'
-    ? 'from the Inbox folder'
-    : folder === 'flagged'
-    ? 'that are flagged'
-    : 'from all mail';
+  const args = { limit };
+  if (since) args.afterDateTime = since;
+  if (folder === 'inbox')   args.folderName = 'Inbox';
+  if (folder === 'flagged') args.folderName = 'Flagged';
 
-  const timeInstruction = since ? `received since ${since}` : '';
+  const result = await callTool('outlook_email_search', args);
 
-  const prompt = `Use the outlook_email_search tool to fetch up to ${count} emails ${folderInstruction} ${timeInstruction}.
-For each email returned, if you need the full body use read_resource with the email URI.
+  // The MCP server may return a single email object, an array, or
+  // a stream of objects concatenated as text — normalise to an array.
+  let emails = [];
+  if (Array.isArray(result))     emails = result;
+  else if (result?.emails)       emails = result.emails;
+  else if (result?.value)        emails = result.value;
+  else if (typeof result === 'object' && result?.id) emails = [result];
 
-Return ONLY a JSON array (no markdown, no explanation) where each item has:
-{
-  "id": string,
-  "subject": string,
-  "sender": { "name": string, "email": string },
-  "receivedAt": ISO datetime string,
-  "bodyPreview": string (first 300 chars of body),
-  "uri": string (the mail URI),
-  "conversationId": string or null
-}`;
-
-  const raw = await runMcpPrompt(prompt, 8192);
-
-  try {
-    const match = raw.match(/\[[\s\S]*\]/);
-    return match ? JSON.parse(match[0]) : [];
-  } catch {
-    console.error('[MCP] Failed to parse email list:', raw.slice(0, 200));
-    return [];
-  }
+  return emails.map((e) => ({
+    id: e.id || e.messageId || String(Math.random()),
+    subject: e.subject || '(No subject)',
+    sender: {
+      name: e.sender?.name || e.from?.name || (typeof e.sender === 'string' ? e.sender : 'Unknown'),
+      email: e.sender?.email || e.from?.email || (typeof e.sender === 'string' ? e.sender : ''),
+    },
+    receivedAt: e.receivedDateTime || e.receivedAt || e.date,
+    bodyPreview: (e.summary || e.bodyPreview || e.preview || '').slice(0, 500),
+    uri: e.uri || (e.id ? `mail:///messages/${e.id}` : null),
+    conversationId: e.conversationId || null,
+  }));
 }
 
 export async function fetchEmailBody(uri) {
   if (!uri) return null;
   try {
-    const raw = await runMcpPrompt(
-      `Use the read_resource tool to fetch the full content of this email URI: ${uri}
-Return ONLY the plain text body of the email, nothing else.`,
-      2048
-    );
-    return raw || null;
+    const result = await callTool('read_resource', { uri });
+    return result?.body?.content || result?.body || result?.content || null;
   } catch (err) {
-    console.warn('[MCP] fetchEmailBody failed:', err.message);
+    console.warn('[MCP] read_resource failed for', uri, err.message);
     return null;
   }
 }
@@ -117,14 +156,20 @@ Return ONLY the plain text body of the email, nothing else.`,
 export async function fetchThreadMessages(conversationId) {
   if (!conversationId) return [];
   try {
-    const raw = await runMcpPrompt(
-      `Use the outlook_email_search tool to find all emails in the conversation with conversationId "${conversationId}". Limit 20.
-Return ONLY a JSON array with each item:
-{ "id": string, "subject": string, "sender": { "name": string, "email": string }, "receivedAt": string, "body": string }`,
-      4096
-    );
-    const match = raw.match(/\[[\s\S]*\]/);
-    return match ? JSON.parse(match[0]) : [];
+    const result = await callTool('outlook_email_search', { limit: 20 });
+    const emails = Array.isArray(result) ? result : result?.emails || [];
+    return emails
+      .filter((e) => e.conversationId === conversationId)
+      .map((e) => ({
+        id: e.id,
+        subject: e.subject || '(No subject)',
+        sender: {
+          name: e.sender?.name || e.from?.name || 'Unknown',
+          email: e.sender?.email || e.from?.email || '',
+        },
+        receivedAt: e.receivedDateTime || e.date,
+        body: e.summary || e.bodyPreview || '',
+      }));
   } catch (err) {
     console.warn('[MCP] fetchThreadMessages failed:', err.message);
     return [];
