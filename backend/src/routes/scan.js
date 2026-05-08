@@ -32,7 +32,7 @@ router.post('/', async (req, res) => {
         emailCount: classified.length,
         flaggedCount: flagged.length,
         urgentCount: urgent.length,
-        results: flagged,
+        results: JSON.stringify(flagged),
       },
     });
 
