@@ -7,8 +7,20 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String       @id @default(uuid())
+  microsoftId  String       @unique
+  email        String       @unique
+  displayName  String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  scanResults  ScanResult[]
+}
+
 model ScanResult {
   id           String   @id @default(uuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   scannedAt    DateTime @default(now())
   timeWindow   String
   folder       String

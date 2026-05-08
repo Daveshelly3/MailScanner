@@ -1,21 +1,20 @@
 import { Router } from 'express';
-import { fetchEmailBody, fetchThreadMessages } from '../services/mcpClient.js';
+import { requireAuth } from '../middleware/auth.js';
+import { fetchEmailBody, fetchThreadMessages } from '../services/emailService.js';
 import { draftReply, summariseThread, adviseOnEmail } from '../services/aiService.js';
 
 const router = Router();
 
-router.post('/draft-reply', async (req, res) => {
+router.post('/draft-reply', requireAuth, async (req, res) => {
   const { email, instruction } = req.body;
   if (!email?.id) return res.status(400).json({ error: 'Email data required' });
 
   try {
-    const fullBody = email.uri ? await fetchEmailBody(email.uri) : null;
+    const fullBody = await fetchEmailBody(req, { uri: email.uri, messageId: email.id });
     const enriched = { ...email, body: fullBody || email.bodyPreview };
-
-    let threadMessages = null;
-    if (email.conversationId) {
-      threadMessages = await fetchThreadMessages(email.conversationId, email.id);
-    }
+    const threadMessages = email.conversationId
+      ? await fetchThreadMessages(req, { conversationId: email.conversationId })
+      : null;
 
     const draft = await draftReply({ email: enriched, threadMessages, instruction });
     res.json({ draft });
@@ -25,17 +24,16 @@ router.post('/draft-reply', async (req, res) => {
   }
 });
 
-router.post('/summarise', async (req, res) => {
+router.post('/summarise', requireAuth, async (req, res) => {
   const { email } = req.body;
   if (!email?.id) return res.status(400).json({ error: 'Email data required' });
 
   try {
-    let threadMessages = [];
-    if (email.conversationId) {
-      threadMessages = await fetchThreadMessages(email.conversationId, email.id);
-    }
+    let threadMessages = email.conversationId
+      ? await fetchThreadMessages(req, { conversationId: email.conversationId })
+      : [];
     if (!threadMessages.length) {
-      const body = email.uri ? await fetchEmailBody(email.uri) : null;
+      const body = await fetchEmailBody(req, { uri: email.uri, messageId: email.id });
       threadMessages = [{ ...email, body: body || email.bodyPreview }];
     }
 
@@ -52,17 +50,15 @@ router.post('/summarise', async (req, res) => {
   }
 });
 
-router.post('/advise', async (req, res) => {
+router.post('/advise', requireAuth, async (req, res) => {
   const { email } = req.body;
   if (!email?.id) return res.status(400).json({ error: 'Email data required' });
 
   try {
-    let threadMessages = null;
-    if (email.conversationId) {
-      threadMessages = await fetchThreadMessages(email.conversationId, email.id);
-    }
-
-    const fullBody = email.uri ? await fetchEmailBody(email.uri) : null;
+    const threadMessages = email.conversationId
+      ? await fetchThreadMessages(req, { conversationId: email.conversationId })
+      : null;
+    const fullBody = await fetchEmailBody(req, { uri: email.uri, messageId: email.id });
     const enriched = { ...email, body: fullBody || email.bodyPreview };
 
     const advice = await adviseOnEmail({ email: enriched, threadMessages });
